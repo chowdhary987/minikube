@@ -17,7 +17,10 @@ limitations under the License.
 package machine
 
 import (
+	"bytes"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -38,7 +41,6 @@ import (
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/cruntime"
-	"k8s.io/minikube/pkg/minikube/sshutil"
 )
 
 const tempLoadDir = "/tmp"
@@ -97,7 +99,8 @@ func LoadImages(cmd bootstrapper.CommandRunner, images []string, cacheDir string
 		g.Go(func() error {
 			src := filepath.Join(cacheDir, image)
 			src = sanitizeCacheDir(src)
-			if err := LoadFromCacheBlocking(cmd, cc.KubernetesConfig, src); err != nil {
+			if err := loadImageFromCache(cmd, cc.KubernetesConfig, src); err != nil {
+				glog.Warningf("Failed to load %s: %v", src, err)
 				return errors.Wrapf(err, "loading image %s", src)
 			}
 			return nil
@@ -125,16 +128,11 @@ func CacheAndLoadImages(images []string) error {
 		return err
 	}
 
-	client, err := sshutil.NewSSHClient(h.Driver)
+	runner, err := CommandRunner(h)
 	if err != nil {
 		return err
 	}
-	cmdRunner, err := bootstrapper.NewSSHRunner(client), nil
-	if err != nil {
-		return err
-	}
-
-	return LoadImages(cmdRunner, images, constants.ImageCacheDir)
+	return LoadImages(runner, images, constants.ImageCacheDir)
 }
 
 // # ParseReference cannot have a : in the directory path
@@ -198,14 +196,12 @@ func getWindowsVolumeNameCmd(d string) (string, error) {
 	return vname, nil
 }
 
-// LoadFromCacheBlocking loads images from cache, blocking until loaded
-func LoadFromCacheBlocking(cr bootstrapper.CommandRunner, k8s config.KubernetesConfig, src string) error {
-	glog.Infoln("Loading image from cache at ", src)
+// loadImageFromCache loads a single image from the cache
+func loadImageFromCache(cr bootstrapper.CommandRunner, k8s config.KubernetesConfig, src string) error {
+	glog.Infof("Loading image from cache: %s", src)
 	filename := filepath.Base(src)
-	for {
-		if _, err := os.Stat(src); err == nil {
-			break
-		}
+	if _, err := os.Stat(src); err != nil {
+		return err
 	}
 	dst := path.Join(tempLoadDir, filename)
 	f, err := assets.NewFileAsset(src, tempLoadDir, filename, "0777")
@@ -274,7 +270,7 @@ func cleanImageCacheDir() error {
 	return err
 }
 
-func getDstPath(image, dst string) (string, error) {
+func getDstPath(dst string) (string, error) {
 	if runtime.GOOS == "windows" && hasWindowsDriveLetter(dst) {
 		// ParseReference does not support a Windows drive letter.
 		// Therefore, will replace the drive letter to a volume name.
@@ -289,12 +285,29 @@ func getDstPath(image, dst string) (string, error) {
 
 // CacheImage caches an image
 func CacheImage(image, dst string) error {
+	// There are go-containerregistry calls here that result in
+	// ugly log messages getting printed to stdout. Capture
+	// stdout instead and writing it to info.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return errors.Wrap(err, "opening writing buffer")
+	}
+	log.SetOutput(w)
+	defer func() {
+		log.SetOutput(os.Stdout)
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			glog.Errorf("output copy failed: %v", err)
+		}
+		glog.Infof(buf.String())
+	}()
+
 	glog.Infof("Attempting to cache image: %s at %s\n", image, dst)
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
 
-	dstPath, err := getDstPath(image, dst)
+	dstPath, err := getDstPath(dst)
 	if err != nil {
 		return errors.Wrap(err, "getting destination path")
 	}
@@ -303,12 +316,12 @@ func CacheImage(image, dst string) error {
 		return errors.Wrapf(err, "making cache image directory: %s", dst)
 	}
 
-	tag, err := name.NewTag(image, name.WeakValidation)
+	ref, err := name.ParseReference(image, name.WeakValidation)
 	if err != nil {
 		return errors.Wrap(err, "creating docker image name")
 	}
 
-	img, err := remote.Image(tag, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	img, err := remote.Image(ref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
 		return errors.Wrap(err, "fetching remote image")
 	}
@@ -318,7 +331,7 @@ func CacheImage(image, dst string) error {
 	if err != nil {
 		return err
 	}
-	err = tarball.Write(tag, img, nil, f)
+	err = tarball.Write(ref, img, f)
 	if err != nil {
 		return err
 	}

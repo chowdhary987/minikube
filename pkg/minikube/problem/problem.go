@@ -23,14 +23,19 @@ import (
 	"k8s.io/minikube/pkg/minikube/console"
 )
 
-const issueBase = "https://github.com/kubernetes/minikube/issue"
+const issueBase = "https://github.com/kubernetes/minikube/issues"
 
 // Problem represents a known problem in minikube.
 type Problem struct {
-	ID     string
-	Err    error
+	// ID is an arbitrary unique and stable string describing this issue
+	ID string
+	// Err is the original error
+	Err error
+	// Advice is actionable text that the user should follow
 	Advice string
-	URL    string
+	// URL is a reference URL for more information
+	URL string
+	// Issues are a list of related issues to this problem
 	Issues []int
 }
 
@@ -40,38 +45,44 @@ type match struct {
 	Advice string
 	URL    string
 	Issues []int
+	// GOOS is what platforms this problem may be specific to, when disambiguation is necessary.
+	GOOS string
 }
 
 // Display problem metadata to the console
 func (p *Problem) Display() {
-	console.ErrStyle("failure", "Error:         [%s] %v", p.ID, p.Err)
-	console.ErrStyle("tip", "Advice:        %s", p.Advice)
+	console.ErrStyle(console.FailureType, "Error:         [%s] %v", p.ID, p.Err)
+	console.ErrStyle(console.Tip, "Advice:        %s", p.Advice)
 	if p.URL != "" {
-		console.ErrStyle("documentation", "Documentation: %s", p.URL)
+		console.ErrStyle(console.Documentation, "Documentation: %s", p.URL)
 	}
 	if len(p.Issues) == 0 {
 		return
 	}
-	console.ErrStyle("issues", "Related issues:")
+	console.ErrStyle(console.Issues, "Related issues:")
 	issues := p.Issues
 	if len(issues) > 3 {
 		issues = issues[0:3]
 	}
 	for _, i := range issues {
-		console.ErrStyle("issue", "%s/%d", issueBase, i)
+		console.ErrStyle(console.Issue, "%s/%d", issueBase, i)
 	}
 }
 
-// FromError returns a known problem from an error.
-func FromError(err error) *Problem {
+// FromError returns a known problem from an error on an OS
+func FromError(err error, os string) *Problem {
 	maps := []map[string]match{
 		osProblems,
 		vmProblems,
 		netProblems,
 		deployProblems,
+		stateProblems,
 	}
 	for _, m := range maps {
 		for k, v := range m {
+			if v.GOOS != "" && v.GOOS != os {
+				continue
+			}
 			if v.Regexp.MatchString(err.Error()) {
 				return &Problem{
 					Err:    err,

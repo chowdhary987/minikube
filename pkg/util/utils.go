@@ -32,6 +32,7 @@ import (
 
 	units "github.com/docker/go-units"
 	"github.com/golang/glog"
+	retryablehttp "github.com/hashicorp/go-retryablehttp"
 	"github.com/pkg/errors"
 )
 
@@ -130,7 +131,7 @@ func RetryAfter(attempts int, callback func() error, d time.Duration) (err error
 
 // ParseSHAFromURL downloads and reads a SHA checksum from an URL
 func ParseSHAFromURL(url string) (string, error) {
-	r, err := http.Get(url)
+	r, err := retryablehttp.Get(url)
 	if err != nil {
 		return "", errors.Wrap(err, "Error downloading checksum.")
 	} else if r.StatusCode != http.StatusOK {
@@ -249,4 +250,38 @@ func TeePrefix(prefix string, r io.Reader, w io.Writer, logger func(format strin
 		logger("%s%s", prefix, line.String())
 	}
 	return nil
+}
+
+// ReplaceChars returns a copy of the src slice with each string modified by the replacer
+func ReplaceChars(src []string, replacer *strings.Replacer) []string {
+	ret := make([]string, len(src))
+	for i, s := range src {
+		ret[i] = replacer.Replace(s)
+	}
+	return ret
+}
+
+// ConcatStrings concatenates each string in the src slice with prefix and postfix and returns a new slice
+func ConcatStrings(src []string, prefix string, postfix string) []string {
+	var buf bytes.Buffer
+	ret := make([]string, len(src))
+	for i, s := range src {
+		buf.WriteString(prefix)
+		buf.WriteString(s)
+		buf.WriteString(postfix)
+		ret[i] = buf.String()
+		buf.Reset()
+	}
+	return ret
+}
+
+// ContainsString checks if a given slice of strings contains the provided string.
+// If a modifier func is provided, it is called with the slice item before the comparation.
+func ContainsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }

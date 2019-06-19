@@ -20,6 +20,7 @@ package exit
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/golang/glog"
 	"k8s.io/minikube/pkg/minikube/console"
@@ -45,7 +46,7 @@ const (
 
 // Usage outputs a usage error and exits with error code 64
 func Usage(format string, a ...interface{}) {
-	console.ErrStyle("usage", format, a...)
+	console.ErrStyle(console.Usage, format, a...)
 	os.Exit(BadUsage)
 }
 
@@ -59,7 +60,7 @@ func WithCode(code int, format string, a ...interface{}) {
 
 // WithError outputs an error and exits.
 func WithError(msg string, err error) {
-	p := problem.FromError(err)
+	p := problem.FromError(err, runtime.GOOS)
 	if p != nil {
 		WithProblem(msg, p)
 	}
@@ -73,8 +74,8 @@ func WithProblem(msg string, p *problem.Problem) {
 	console.Fatal(msg)
 	p.Display()
 	console.Err("\n")
-	console.ErrStyle("sad", "If the advice does not help, please let us know: ")
-	console.ErrStyle("url", "https://github.com/kubernetes/minikube/issues/new")
+	console.ErrStyle(console.Sad, "If the above advice does not help, please let us know: ")
+	console.ErrStyle(console.URL, "https://github.com/kubernetes/minikube/issues/new")
 	os.Exit(Config)
 }
 
@@ -83,12 +84,12 @@ func WithLogEntries(msg string, err error, entries map[string][]string) {
 	displayError(msg, err)
 
 	for name, lines := range entries {
-		console.OutStyle("failure", "Problems detected in %q:", name)
+		console.OutStyle(console.FailureType, "Problems detected in %q:", name)
 		if len(lines) > MaxLogEntries {
 			lines = lines[:MaxLogEntries]
 		}
 		for _, l := range lines {
-			console.OutStyle("log-entry", l)
+			console.OutStyle(console.LogEntry, l)
 		}
 	}
 	os.Exit(Software)
@@ -100,6 +101,6 @@ func displayError(msg string, err error) {
 	console.Err("\n")
 	console.Fatal(msg+": %v", err)
 	console.Err("\n")
-	console.ErrStyle("sad", "Sorry that minikube crashed. If this was unexpected, we would love to hear from you:")
-	console.ErrStyle("url", "https://github.com/kubernetes/minikube/issues/new")
+	console.ErrStyle(console.Sad, "Sorry that minikube crashed. If this was unexpected, we would love to hear from you:")
+	console.ErrStyle(console.URL, "https://github.com/kubernetes/minikube/issues/new")
 }

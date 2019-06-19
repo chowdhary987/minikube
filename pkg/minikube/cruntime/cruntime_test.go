@@ -23,7 +23,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"k8s.io/minikube/pkg/minikube/console"
 )
 
 func TestName(t *testing.T) {
@@ -46,9 +45,6 @@ func TestName(t *testing.T) {
 			got := r.Name()
 			if got != tc.want {
 				t.Errorf("Name(%s) = %q, want: %q", tc.runtime, got, tc.want)
-			}
-			if !console.HasStyle(got) {
-				t.Fatalf("console.HasStyle(%s): %v", got, false)
 			}
 		})
 	}
@@ -149,7 +145,7 @@ func (f *FakeRunner) Run(cmd string) error {
 }
 
 // docker is a fake implementation of docker
-func (f *FakeRunner) docker(args []string, root bool) (string, error) {
+func (f *FakeRunner) docker(args []string, _ bool) (string, error) {
 	switch cmd := args[0]; cmd {
 	case "ps":
 		// ps -a --filter="name=apiserver" --format="{{.ID}}"
@@ -194,25 +190,23 @@ func (f *FakeRunner) docker(args []string, root bool) (string, error) {
 }
 
 // crio is a fake implementation of crio
-func (f *FakeRunner) crio(args []string, root bool) (string, error) {
-	switch cmd := args[0]; cmd {
-	case "--version":
+func (f *FakeRunner) crio(args []string, _ bool) (string, error) {
+	if args[0] == "--version" {
 		return "crio version 1.13.0", nil
 	}
 	return "", nil
 }
 
 // containerd is a fake implementation of containerd
-func (f *FakeRunner) containerd(args []string, root bool) (string, error) {
-	switch cmd := args[0]; cmd {
-	case "--version":
+func (f *FakeRunner) containerd(args []string, _ bool) (string, error) {
+	if args[0] == "--version" {
 		return "containerd github.com/containerd/containerd v1.2.0 c4446665cb9c30056f4998ed953e6d4ff22c7c39", nil
 	}
 	return "", nil
 }
 
 // crictl is a fake implementation of crictl
-func (f *FakeRunner) crictl(args []string, root bool) (string, error) {
+func (f *FakeRunner) crictl(args []string, _ bool) (string, error) {
 	switch cmd := args[0]; cmd {
 	case "ps":
 		// crictl ps -a --name=apiserver --state=Running --quiet
@@ -381,7 +375,7 @@ func TestEnable(t *testing.T) {
 		want    map[string]serviceState
 	}{
 		{"docker", map[string]serviceState{
-			"docker":        Restarted,
+			"docker":        Running,
 			"docker.socket": Running,
 			"containerd":    Exited,
 			"crio":          Exited,
@@ -445,9 +439,6 @@ func TestContainerFunctions(t *testing.T) {
 				"fgh1": prefix + "coredns",
 				"xyz2": prefix + "storage",
 			}
-			if tc.runtime == "docker" {
-				runner.containers["zzz"] = "unrelated"
-			}
 			cr, err := New(Config{Type: tc.runtime, Runner: runner})
 			if err != nil {
 				t.Fatalf("New(%s): %v", tc.runtime, err)
@@ -464,7 +455,9 @@ func TestContainerFunctions(t *testing.T) {
 			}
 
 			// Stop the containers and assert that they have disappeared
-			cr.StopContainers(got)
+			if err := cr.StopContainers(got); err != nil {
+				t.Fatalf("stop failed: %v", err)
+			}
 			got, err = cr.ListContainers("apiserver")
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)
@@ -485,7 +478,9 @@ func TestContainerFunctions(t *testing.T) {
 			}
 
 			// Kill the containers and assert that they have disappeared
-			cr.KillContainers(got)
+			if err := cr.KillContainers(got); err != nil {
+				t.Errorf("KillContainers: %v", err)
+			}
 			got, err = cr.ListContainers("")
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)

@@ -27,6 +27,7 @@ import (
 	"k8s.io/minikube/pkg/minikube/cluster"
 	pkg_config "k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/console"
+	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
 	pkgutil "k8s.io/minikube/pkg/util"
@@ -52,7 +53,7 @@ itself, leaving all files intact. The cluster can be started again with the "sta
 			err = cluster.StopHost(api)
 			switch err := errors.Cause(err).(type) {
 			case mcnerror.ErrHostDoesNotExist:
-				console.OutStyle("meh", "%q VM does not exist, nothing to stop", profile)
+				console.OutStyle(console.Meh, "%q VM does not exist, nothing to stop", profile)
 				nonexistent = true
 				return nil
 			default:
@@ -63,11 +64,17 @@ itself, leaving all files intact. The cluster can be started again with the "sta
 			exit.WithError("Unable to stop VM", err)
 		}
 		if !nonexistent {
-			console.OutStyle("stopped", "%q stopped.", profile)
+			console.OutStyle(console.Stopped, "%q stopped.", profile)
 		}
 
 		if err := cmdUtil.KillMountProcess(); err != nil {
-			exit.WithError("Unable to kill mount process", err)
+			console.OutStyle(console.WarningType, "Unable to kill mount process: %s", err)
+		}
+
+		machineName := pkg_config.GetMachineName()
+		err = pkgutil.UnsetCurrentContext(constants.KubeconfigPath, machineName)
+		if err != nil {
+			exit.WithError("update config", err)
 		}
 	},
 }

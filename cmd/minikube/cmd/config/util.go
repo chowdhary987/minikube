@@ -24,8 +24,10 @@ import (
 
 	"github.com/pkg/errors"
 	"k8s.io/minikube/pkg/minikube/assets"
+	"k8s.io/minikube/pkg/minikube/bootstrapper"
 	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/config"
+	"k8s.io/minikube/pkg/minikube/console"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
@@ -53,7 +55,7 @@ func findSetting(name string) (Setting, error) {
 			return s, nil
 		}
 	}
-	return Setting{}, fmt.Errorf("Property name %s not found", name)
+	return Setting{}, fmt.Errorf("property name %q not found", name)
 }
 
 // Set Functions
@@ -132,6 +134,34 @@ func EnableOrDisableAddon(name string, val string) error {
 	}
 
 	data := assets.GenerateTemplateData(cfg.KubernetesConfig)
+	return enableOrDisableAddonInternal(addon, cmd, data, enable)
+}
+
+func isAddonAlreadySet(addon *assets.Addon, enable bool) error {
+
+	addonStatus, err := addon.IsEnabled()
+
+	if err != nil {
+		return errors.Wrap(err, "get the addon status")
+	}
+
+	if addonStatus && enable {
+		return fmt.Errorf("addon %s was already enabled", addon.Name())
+	} else if !addonStatus && !enable {
+		return fmt.Errorf("addon %s was already disabled", addon.Name())
+	}
+
+	return nil
+}
+
+func enableOrDisableAddonInternal(addon *assets.Addon, cmd bootstrapper.CommandRunner, data interface{}, enable bool) error {
+	var err error
+	// check addon status before enabling/disabling it
+	if err := isAddonAlreadySet(addon, enable); err != nil {
+		console.ErrStyle(console.Conflict, "%v", err)
+		os.Exit(0)
+	}
+
 	if enable {
 		for _, addon := range addon.Assets {
 			var addonFile assets.CopyableFile

@@ -33,7 +33,10 @@ import (
 )
 
 // rootCauseRe is a regular expression that matches known failure root causes
-var rootCauseRe = regexp.MustCompile(`^error: |eviction manager: pods.* evicted|unknown flag: --|forbidden.*no providers available|eviction manager:.*evicted`)
+var rootCauseRe = regexp.MustCompile(`^error: |eviction manager: pods.* evicted|unknown flag: --|forbidden.*no providers available|eviction manager:.*evicted|tls: bad certificate`)
+
+// ignoreRe is a regular expression that matches spurious errors to not surface
+var ignoreCauseRe = regexp.MustCompile("error: no objects passed to apply")
 
 // importantPods are a list of pods to retrieve logs for, in addition to the bootstrapper logs.
 var importantPods = []string{
@@ -41,6 +44,9 @@ var importantPods = []string{
 	"coredns",
 	"kube-scheduler",
 	"kube-proxy",
+	"kube-addon-manager",
+	"kubernetes-dashboard",
+	"storage-provisioner",
 }
 
 // lookbackwardsCount is how far back to look in a log for problems. This should be large enough to
@@ -59,7 +65,7 @@ func Follow(r cruntime.Manager, bs bootstrapper.Bootstrapper, runner bootstrappe
 
 // IsProblem returns whether this line matches a known problem
 func IsProblem(line string) bool {
-	return rootCauseRe.MatchString(line)
+	return rootCauseRe.MatchString(line) && !ignoreCauseRe.MatchString(line)
 }
 
 // FindProblems finds possible root causes among the logs
@@ -93,12 +99,12 @@ func FindProblems(r cruntime.Manager, bs bootstrapper.Bootstrapper, runner boots
 // OutputProblems outputs discovered problems.
 func OutputProblems(problems map[string][]string, maxLines int) {
 	for name, lines := range problems {
-		console.OutStyle("failure", "Problems detected in %q:", name)
+		console.OutStyle(console.FailureType, "Problems detected in %q:", name)
 		if len(lines) > maxLines {
 			lines = lines[len(lines)-maxLines:]
 		}
 		for _, l := range lines {
-			console.OutStyle("log-entry", l)
+			console.OutStyle(console.LogEntry, l)
 		}
 	}
 }

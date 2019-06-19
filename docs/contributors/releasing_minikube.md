@@ -8,6 +8,7 @@
 ## Build a new ISO
 
 Major releases always get a new ISO. Minor bugfixes may or may not require it: check for changes in the `deploy/iso` folder.
+To check, run `git log -- deploy/iso` from the root directory and see if there has been a commit since the most recent release.
 
 Note: you can build the ISO using the `hack/jenkins/build_iso.sh` script locally.
 
@@ -27,13 +28,7 @@ Edit the minikube `Makefile`, updating the version number values at the top:
 * `VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_BUILD` as necessary
 * `ISO_VERSION` - defaults to MAJOR.MINOR.0 - update if point release requires a new ISO to be built.
 
-## Run Local Integration Test
-
-Once the ISO build completes, run run the integration tests with the updated Makefile:
-
-```shell
-env TEST_ARGS="-minikube-start-args=--vm-driver=kvm2" make integration
-```
+Make sure the integration tests run against this PR, once the new ISO is built.
 
 ## Ad-Hoc testing of other platforms
 
@@ -59,12 +54,8 @@ Merge the output into CHANGELOG.md. See [PR#3175](https://github.com/kubernetes/
 
 ## Tag the Release
 
-NOTE: Confirm that all release-related PR's have been submitted before doing this step.
-
-Do this in a direct clone of the upstream kubernetes/minikube repository (not your fork!):
-
 ```shell
-hack/tag_release.sh <new version number>
+sh hack/tag_release.sh 1.<minor>.<patch>
 ```
 
 ## Build the Release
@@ -78,6 +69,10 @@ This step uses the git tag to publish new binaries to GCS and create a github re
 * For `ISO_SHA256`, run: `gsutil cat gs://minikube/iso/minikube-v<version>.iso.sha256`
 * Click *Build*
 
+## Check the release logs
+
+After job completion, click "Console Output" to verify that the release completed without errors. This is typically where one  will see brew automation fail, for instance.
+
 ## Check releases.json
 
 This file is used for auto-update notifications, but is not active until releases.json is copied to GCS.
@@ -90,21 +85,25 @@ These are downstream packages that are being maintained by others and how to upg
 
 | Package Manager | URL | TODO |
 | --- | --- | --- |
-| Arch Linux AUR | <https://aur.archlinux.org/packages/minikube/> | "Flag as package out-of-date"
+| Arch Linux AUR | <https://aur.archlinux.org/packages/minikube-bin/> | "Flag as package out-of-date"
 | Brew Cask | <https://github.com/Homebrew/homebrew-cask/blob/master/Casks/minikube.rb> | The release job creates a new PR in [Homebrew/homebrew-cask](https://github.com/Homebrew/homebrew-cask) with an updated version and SHA256, double check that it's created.
+
+WARNING: The Brew cask automation is error-prone. please ensure that a PR was created.
 
 ## Verification
 
 Verify release checksums by running`make check-release`
 
-## Update docs
+## Update minikube frontpage
+
+We document the last 3 releases on our frontpage. Please add it to the list: https://github.com/kubernetes/minikube/blob/master/README.md
+
+## Update official Kubernetes docs
 
 If there are major changes, please send a PR to update <https://kubernetes.io/docs/setup/minikube/>
 
 ## Announce!
 
-Places we generally announce releases:
-
 - #minikube on Slack
 - minikube-dev, minikube-users mailing list
-- Twitter
+- Twitter (optional!)

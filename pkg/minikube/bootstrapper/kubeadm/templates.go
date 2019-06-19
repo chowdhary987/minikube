@@ -56,12 +56,12 @@ apiEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
-- groups:
-  - system:bootstrappers:kubeadm:default-node-token
-  ttl: 24h0m0s
-  usages:
-  - signing
-  - authentication
+  - groups:
+      - system:bootstrappers:kubeadm:default-node-token
+    ttl: 24h0m0s
+    usages:
+      - signing
+      - authentication
 nodeRegistration:
   criSocket: {{if .CRISocket}}{{.CRISocket}}{{else}}/var/run/dockershim.sock{{end}}
   name: {{.NodeName}}
@@ -72,9 +72,10 @@ kind: ClusterConfiguration
 {{if .ImageRepository}}imageRepository: {{.ImageRepository}}
 {{end}}{{range .ExtraArgs}}{{.Component}}ExtraArgs:{{range $i, $val := printMapInOrder .Options ": " }}
   {{$val}}{{end}}
-{{end}}{{if .FeatureArgs}}featureGates: {{range $i, $val := .FeatureArgs}}
+{{end -}}
+{{if .FeatureArgs}}featureGates: {{range $i, $val := .FeatureArgs}}
   {{$i}}: {{$val}}{{end}}
-{{end}}
+{{end -}}
 certificatesDir: {{.CertDir}}
 clusterName: kubernetes
 controlPlaneEndpoint: localhost:{{.APIServerPort}}
@@ -84,7 +85,7 @@ etcd:
 kubernetesVersion: {{.KubernetesVersion}}
 networking:
   dnsDomain: cluster.local
-  podSubnet: ""
+  podSubnet: {{if .PodSubnet}}{{.PodSubnet}}{{else}}""{{end}}
   serviceSubnet: {{.ServiceCIDR}}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -104,12 +105,12 @@ localAPIEndpoint:
   advertiseAddress: {{.AdvertiseAddress}}
   bindPort: {{.APIServerPort}}
 bootstrapTokens:
-- groups:
-  - system:bootstrappers:kubeadm:default-node-token
-  ttl: 24h0m0s
-  usages:
-  - signing
-  - authentication
+  - groups:
+      - system:bootstrappers:kubeadm:default-node-token
+    ttl: 24h0m0s
+    usages:
+      - signing
+      - authentication
 nodeRegistration:
   criSocket: {{if .CRISocket}}{{.CRISocket}}{{else}}/var/run/dockershim.sock{{end}}
   name: {{.NodeName}}
@@ -117,13 +118,16 @@ nodeRegistration:
 ---
 apiVersion: kubeadm.k8s.io/v1beta1
 kind: ClusterConfiguration
-{{if .ImageRepository}}imageRepository: {{.ImageRepository}}
+{{ if .ImageRepository}}imageRepository: {{.ImageRepository}}
 {{end}}{{range .ExtraArgs}}{{.Component}}:
   extraArgs:
-    {{range $i, $val := printMapInOrder .Options ": " }}{{$val}}{{end}}
-{{end}}{{if .FeatureArgs}}featureGates: {{range $i, $val := .FeatureArgs}}
-  {{$i}}: {{$val}}{{end}}
+{{- range $i, $val := printMapInOrder .Options ": " }}
+    {{$val}}
+{{- end}}
 {{end -}}
+{{if .FeatureArgs}}featureGates:
+{{range $i, $val := .FeatureArgs}}{{$i}}: {{$val}}
+{{end -}}{{end -}}
 certificatesDir: {{.CertDir}}
 clusterName: kubernetes
 controlPlaneEndpoint: localhost:{{.APIServerPort}}
@@ -172,10 +176,6 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 `
-
-var kubeadmInitTemplate = template.Must(template.New("kubeadmInitTemplate").Parse(`
-sudo /usr/bin/kubeadm init --config {{.KubeadmConfigFile}} {{.ExtraOptions}} {{if .SkipPreflightChecks}}--skip-preflight-checks{{else}}{{range .Preflights}}--ignore-preflight-errors={{.}} {{end}}{{end}}
-`))
 
 // printMapInOrder sorts the keys and prints the map in order, combining key
 // value pairs with the separator character

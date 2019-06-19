@@ -22,7 +22,7 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	"k8s.io/api/core/v1"
+	core "k8s.io/api/core/v1"
 	"k8s.io/minikube/pkg/minikube/console"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
@@ -45,7 +45,7 @@ var serviceListCmd = &cobra.Command{
 		serviceURLs, err := service.GetServiceURLs(api, serviceListNamespace, serviceURLTemplate)
 		if err != nil {
 			console.Fatal("Failed to get service URL: %v", err)
-			console.ErrStyle("notice", "Check that minikube is running and that you have specified the correct namespace (-n flag) if required.")
+			console.ErrStyle(console.Notice, "Check that minikube is running and that you have specified the correct namespace (-n flag) if required.")
 			os.Exit(exit.Unavailable)
 		}
 
@@ -69,6 +69,6 @@ var serviceListCmd = &cobra.Command{
 }
 
 func init() {
-	serviceListCmd.Flags().StringVarP(&serviceListNamespace, "namespace", "n", v1.NamespaceAll, "The services namespace")
+	serviceListCmd.Flags().StringVarP(&serviceListNamespace, "namespace", "n", core.NamespaceAll, "The services namespace")
 	serviceCmd.AddCommand(serviceListCmd)
 }

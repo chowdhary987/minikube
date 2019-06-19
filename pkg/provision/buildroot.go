@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 
@@ -47,6 +48,9 @@ type BuildrootProvisioner struct {
 	provision.SystemdProvisioner
 }
 
+// for escaping systemd template specifiers (e.g. '%i'), which are not supported by minikube
+var systemdSpecifierEscaper = strings.NewReplacer("%", "%%")
+
 func init() {
 	provision.Register("Buildroot", &provision.RegisteredProvisioner{
 		New: NewBuildrootProvisioner,
@@ -62,6 +66,17 @@ func NewBuildrootProvisioner(d drivers.Driver) provision.Provisioner {
 
 func (p *BuildrootProvisioner) String() string {
 	return "buildroot"
+}
+
+// escapeSystemdDirectives escapes special characters in the input variables used to create the
+// systemd unit file, which would otherwise be interpreted as systemd directives. An example
+// are template specifiers (e.g. '%i') which are predefined variables that get evaluated dynamically
+// (see systemd man pages for more info). This is not supported by minikube, thus needs to be escaped.
+func escapeSystemdDirectives(engineConfigContext *provision.EngineConfigContext) {
+	// escape '%' in Environment option so that it does not evaluate into a template specifier
+	engineConfigContext.EngineOptions.Env = util.ReplaceChars(engineConfigContext.EngineOptions.Env, systemdSpecifierEscaper)
+	// input might contain whitespaces, wrap it in quotes
+	engineConfigContext.EngineOptions.Env = util.ConcatStrings(engineConfigContext.EngineOptions.Env, "\"", "\"")
 }
 
 // GenerateDockerOptions generates the *provision.DockerOptions for this provisioner
@@ -126,6 +141,8 @@ WantedBy=multi-user.target
 		AuthOptions:   p.AuthOptions,
 		EngineOptions: p.EngineOptions,
 	}
+
+	escapeSystemdDirectives(&engineConfigContext)
 
 	if err := t.Execute(&engineCfg, engineConfigContext); err != nil {
 		return nil, err
@@ -232,21 +249,9 @@ func configureAuth(p *BuildrootProvisioner) error {
 		return errors.Wrap(err, "error getting ip during provisioning")
 	}
 
-	execRunner := &bootstrapper.ExecRunner{}
-	hostCerts := map[string]string{
-		authOptions.CaCertPath:     path.Join(authOptions.StorePath, "ca.pem"),
-		authOptions.ClientCertPath: path.Join(authOptions.StorePath, "cert.pem"),
-		authOptions.ClientKeyPath:  path.Join(authOptions.StorePath, "key.pem"),
-	}
-
-	for src, dst := range hostCerts {
-		f, err := assets.NewFileAsset(src, path.Dir(dst), filepath.Base(dst), "0777")
-		if err != nil {
-			return errors.Wrapf(err, "open cert file: %s", src)
-		}
-		if err := execRunner.Copy(f); err != nil {
-			return errors.Wrapf(err, "transferring file: %+v", f)
-		}
+	err = copyHostCerts(authOptions)
+	if err != nil {
+		return err
 	}
 
 	// The Host IP is always added to the certificate's SANs list
@@ -273,25 +278,9 @@ func configureAuth(p *BuildrootProvisioner) error {
 		return fmt.Errorf("error generating server cert: %v", err)
 	}
 
-	remoteCerts := map[string]string{
-		authOptions.CaCertPath:     authOptions.CaCertRemotePath,
-		authOptions.ServerCertPath: authOptions.ServerCertRemotePath,
-		authOptions.ServerKeyPath:  authOptions.ServerKeyRemotePath,
-	}
-
-	sshClient, err := sshutil.NewSSHClient(driver)
+	err = copyRemoteCerts(authOptions, driver)
 	if err != nil {
-		return errors.Wrap(err, "provisioning: error getting ssh client")
-	}
-	sshRunner := bootstrapper.NewSSHRunner(sshClient)
-	for src, dst := range remoteCerts {
-		f, err := assets.NewFileAsset(src, path.Dir(dst), filepath.Base(dst), "0640")
-		if err != nil {
-			return errors.Wrapf(err, "error copying %s to %s", src, dst)
-		}
-		if err := sshRunner.Copy(f); err != nil {
-			return errors.Wrapf(err, "transferring file to machine %v", f)
-		}
+		return err
 	}
 
 	config, err := config.Load()
@@ -318,6 +307,52 @@ func configureAuth(p *BuildrootProvisioner) error {
 
 		if err := p.Service("docker", serviceaction.Restart); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func copyHostCerts(authOptions auth.Options) error {
+	execRunner := &bootstrapper.ExecRunner{}
+	hostCerts := map[string]string{
+		authOptions.CaCertPath:     path.Join(authOptions.StorePath, "ca.pem"),
+		authOptions.ClientCertPath: path.Join(authOptions.StorePath, "cert.pem"),
+		authOptions.ClientKeyPath:  path.Join(authOptions.StorePath, "key.pem"),
+	}
+
+	for src, dst := range hostCerts {
+		f, err := assets.NewFileAsset(src, path.Dir(dst), filepath.Base(dst), "0777")
+		if err != nil {
+			return errors.Wrapf(err, "open cert file: %s", src)
+		}
+		if err := execRunner.Copy(f); err != nil {
+			return errors.Wrapf(err, "transferring file: %+v", f)
+		}
+	}
+
+	return nil
+}
+
+func copyRemoteCerts(authOptions auth.Options, driver drivers.Driver) error {
+	remoteCerts := map[string]string{
+		authOptions.CaCertPath:     authOptions.CaCertRemotePath,
+		authOptions.ServerCertPath: authOptions.ServerCertRemotePath,
+		authOptions.ServerKeyPath:  authOptions.ServerKeyRemotePath,
+	}
+
+	sshClient, err := sshutil.NewSSHClient(driver)
+	if err != nil {
+		return errors.Wrap(err, "provisioning: error getting ssh client")
+	}
+	sshRunner := bootstrapper.NewSSHRunner(sshClient)
+	for src, dst := range remoteCerts {
+		f, err := assets.NewFileAsset(src, path.Dir(dst), filepath.Base(dst), "0640")
+		if err != nil {
+			return errors.Wrapf(err, "error copying %s to %s", src, dst)
+		}
+		if err := sshRunner.Copy(f); err != nil {
+			return errors.Wrapf(err, "transferring file to machine %v", f)
 		}
 	}
 

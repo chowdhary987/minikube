@@ -1,16 +1,20 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
 reviewers:
-  - dlorenc
   - balopat
   - tstromberg
-  - priyawadhwa
   - afbjorklund
+  - sharifelgamal
+  - RA489
+  - medyagh
 approvers:
+  - balopat
+  - tstromberg
+  - afbjorklund
+  - sharifelgamal
+  - RA489
+  - medyagh
+emeritus_approvers:
   - dlorenc
   - luxas
   - jimmidyson
-  - balopat
-  - tstromberg
-  - priyawadhwa
-  - afbjorklund

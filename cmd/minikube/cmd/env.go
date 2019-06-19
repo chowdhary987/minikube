@@ -26,7 +26,9 @@ import (
 	"text/template"
 
 	"github.com/docker/machine/libmachine"
+	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/host"
+	"github.com/docker/machine/libmachine/log"
 	"github.com/docker/machine/libmachine/shell"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/pkg/errors"
@@ -39,7 +41,7 @@ import (
 )
 
 const (
-	envTmpl = `{{ .Prefix }}DOCKER_TLS_VERIFY{{ .Delimiter }}{{ .DockerTLSVerify }}{{ .Suffix }}{{ .Prefix }}DOCKER_HOST{{ .Delimiter }}{{ .DockerHost }}{{ .Suffix }}{{ .Prefix }}DOCKER_CERT_PATH{{ .Delimiter }}{{ .DockerCertPath }}{{ .Suffix }}{{ .Prefix }}DOCKER_API_VERSION{{ .Delimiter }}{{ .DockerAPIVersion }}{{ .Suffix }}{{ if .NoProxyVar }}{{ .Prefix }}{{ .NoProxyVar }}{{ .Delimiter }}{{ .NoProxyValue }}{{ .Suffix }}{{end}}{{ .UsageHint }}`
+	envTmpl = `{{ .Prefix }}DOCKER_TLS_VERIFY{{ .Delimiter }}{{ .DockerTLSVerify }}{{ .Suffix }}{{ .Prefix }}DOCKER_HOST{{ .Delimiter }}{{ .DockerHost }}{{ .Suffix }}{{ .Prefix }}DOCKER_CERT_PATH{{ .Delimiter }}{{ .DockerCertPath }}{{ .Suffix }}{{ if .NoProxyVar }}{{ .Prefix }}{{ .NoProxyVar }}{{ .Delimiter }}{{ .NoProxyValue }}{{ .Suffix }}{{end}}{{ .UsageHint }}`
 
 	fishSetPfx   = "set -gx "
 	fishSetSfx   = "\";\n"
@@ -106,16 +108,15 @@ REM @FOR /f "tokens=*" %i IN ('minikube docker-env') DO @%i
 
 // ShellConfig represents the shell config
 type ShellConfig struct {
-	Prefix           string
-	Delimiter        string
-	Suffix           string
-	DockerCertPath   string
-	DockerHost       string
-	DockerTLSVerify  string
-	DockerAPIVersion string
-	UsageHint        string
-	NoProxyVar       string
-	NoProxyValue     string
+	Prefix          string
+	Delimiter       string
+	Suffix          string
+	DockerCertPath  string
+	DockerHost      string
+	DockerTLSVerify string
+	UsageHint       string
+	NoProxyVar      string
+	NoProxyValue    string
 }
 
 var (
@@ -163,11 +164,10 @@ func shellCfgSet(api libmachine.API) (*ShellConfig, error) {
 	}
 
 	shellCfg := &ShellConfig{
-		DockerCertPath:   envMap["DOCKER_CERT_PATH"],
-		DockerHost:       envMap["DOCKER_HOST"],
-		DockerTLSVerify:  envMap["DOCKER_TLS_VERIFY"],
-		DockerAPIVersion: constants.DockerAPIVersion,
-		UsageHint:        generateUsageHint(userShell),
+		DockerCertPath:  envMap["DOCKER_CERT_PATH"],
+		DockerHost:      envMap["DOCKER_HOST"],
+		DockerTLSVerify: envMap["DOCKER_TLS_VERIFY"],
+		UsageHint:       generateUsageHint(userShell),
 	}
 
 	if noProxy {
@@ -301,13 +301,31 @@ func (EnvNoProxyGetter) GetNoProxyVar() (string, string) {
 	return noProxyVar, noProxyValue
 }
 
+// same as drivers.RunSSHCommandFromDriver, but allows errors
+func runSSHCommandFromDriver(d drivers.Driver, command string) (string, error) {
+	client, err := drivers.GetSSHClientFromDriver(d)
+	if err != nil {
+		return "", err
+	}
+
+	log.Debugf("About to run SSH command:\n%s", command)
+	output, err := client.Output(command)
+	log.Debugf("SSH cmd err, output: %v: %s", err, output)
+	return output, err
+}
+
+// same as host.RunSSHCommand, but allows errors
+func runSSHCommand(h *host.Host, command string) (string, error) {
+	return runSSHCommandFromDriver(h.Driver, command)
+}
+
 // GetDockerActive checks if Docker is active
 func GetDockerActive(host *host.Host) (bool, error) {
 	statusCmd := `sudo systemctl is-active docker`
-	status, err := host.RunSSHCommand(statusCmd)
+	status, err := runSSHCommand(host, statusCmd)
 	// systemd returns error code on inactive
 	s := strings.TrimSpace(status)
-	return err == nil && s == "active", err
+	return err == nil && s == "active", nil
 }
 
 // envCmd represents the docker-env command
@@ -325,7 +343,7 @@ var dockerEnvCmd = &cobra.Command{
 		if err != nil {
 			exit.WithError("Error getting host", err)
 		}
-		if host.Driver.DriverName() == "none" {
+		if host.Driver.DriverName() == constants.DriverNone {
 			exit.Usage(`'none' driver does not support 'minikube docker-env' command`)
 		}
 		hostSt, err := cluster.GetHostStatus(api)
@@ -357,7 +375,9 @@ var dockerEnvCmd = &cobra.Command{
 			}
 		}
 
-		executeTemplateStdout(shellCfg)
+		if err := executeTemplateStdout(shellCfg); err != nil {
+			exit.WithError("Error executing template", err)
+		}
 	},
 }
 

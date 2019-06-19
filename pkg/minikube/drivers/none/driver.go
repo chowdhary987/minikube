@@ -1,5 +1,3 @@
-// +build linux
-
 /*
 Copyright 2018 The Kubernetes Authors All rights reserved.
 
@@ -19,6 +17,9 @@ limitations under the License.
 package none
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/docker/machine/libmachine/drivers"
 	"k8s.io/minikube/pkg/drivers/none"
 	cfg "k8s.io/minikube/pkg/minikube/config"
@@ -27,14 +28,16 @@ import (
 )
 
 func init() {
-	registry.Register(registry.DriverDef{
-		Name:          "none",
+	if err := registry.Register(registry.DriverDef{
+		Name:          constants.DriverNone,
 		Builtin:       true,
 		ConfigCreator: createNoneHost,
 		DriverCreator: func() drivers.Driver {
 			return none.NewDriver(none.Config{})
 		},
-	})
+	}); err != nil {
+		panic(fmt.Sprintf("register failed: %v", err))
+	}
 }
 
 // createNoneHost creates a none Driver from a MachineConfig
@@ -44,4 +47,14 @@ func createNoneHost(config cfg.MachineConfig) interface{} {
 		StorePath:        constants.GetMinipath(),
 		ContainerRuntime: config.ContainerRuntime,
 	})
+}
+
+// AutoOptions returns suggested extra options based on the current config
+func AutoOptions() string {
+	// for more info see: https://github.com/kubernetes/minikube/issues/3511
+	f := "/run/systemd/resolve/resolv.conf"
+	if _, err := os.Stat(f); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("kubelet.resolv-conf=%s", f)
 }

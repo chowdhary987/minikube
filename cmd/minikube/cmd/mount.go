@@ -45,8 +45,8 @@ var mountIP string
 var mountVersion string
 var mountType string
 var isKill bool
-var uid int
-var gid int
+var uid string
+var gid string
 var mSize int
 var options []string
 var mode uint
@@ -98,10 +98,11 @@ var mountCmd = &cobra.Command{
 		}
 		defer api.Close()
 		host, err := api.Load(config.GetMachineName())
+
 		if err != nil {
 			exit.WithError("Error loading api", err)
 		}
-		if host.Driver.DriverName() == "none" {
+		if host.Driver.DriverName() == constants.DriverNone {
 			exit.Usage(`'none' driver does not support 'minikube mount' command`)
 		}
 		var ip net.IP
@@ -141,30 +142,37 @@ var mountCmd = &cobra.Command{
 			cfg.Options[parts[0]] = parts[1]
 		}
 
-		console.OutStyle("mounting", "Mounting host path %s into VM as %s ...", hostPath, vmPath)
-		console.OutStyle("mount-options", "Mount options:")
-		console.OutStyle("option", "Type:     %s", cfg.Type)
-		console.OutStyle("option", "UID:      %d", cfg.UID)
-		console.OutStyle("option", "GID:      %d", cfg.GID)
-		console.OutStyle("option", "Version:  %s", cfg.Version)
-		console.OutStyle("option", "MSize:    %d", cfg.MSize)
-		console.OutStyle("option", "Mode:     %o (%s)", cfg.Mode, cfg.Mode)
-		console.OutStyle("option", "Options:  %s", cfg.Options)
+		console.OutStyle(console.Mounting, "Mounting host path %s into VM as %s ...", hostPath, vmPath)
+		console.OutStyle(console.MountOptions, "Mount options:")
+		console.OutStyle(console.Option, "Type:     %s", cfg.Type)
+		console.OutStyle(console.Option, "UID:      %s", cfg.UID)
+		console.OutStyle(console.Option, "GID:      %s", cfg.GID)
+		console.OutStyle(console.Option, "Version:  %s", cfg.Version)
+		console.OutStyle(console.Option, "MSize:    %d", cfg.MSize)
+		console.OutStyle(console.Option, "Mode:     %o (%s)", cfg.Mode, cfg.Mode)
+		console.OutStyle(console.Option, "Options:  %s", cfg.Options)
 
 		// An escape valve to allow future hackers to try NFS, VirtFS, or other FS types.
 		if !supportedFilesystems[cfg.Type] {
 			console.OutLn("")
-			console.OutStyle("warning", "%s is not yet a supported filesystem. We will try anyways!", cfg.Type)
+			console.OutStyle(console.WarningType, "%s is not yet a supported filesystem. We will try anyways!", cfg.Type)
 		}
 
 		var wg sync.WaitGroup
 		if cfg.Type == nineP {
 			wg.Add(1)
 			go func() {
-				console.OutStyle("fileserver", "Userspace file server: ")
+				console.OutStyle(console.Fileserver, "Userspace file server: ")
 				ufs.StartServer(net.JoinHostPort(ip.String(), strconv.Itoa(port)), debugVal, hostPath)
+				console.OutStyle(console.Stopped, "Userspace file server is shutdown")
 				wg.Done()
 			}()
+		}
+
+		// Use CommandRunner, as the native docker ssh service dies when Ctrl-C is received.
+		runner, err := machine.CommandRunner(host)
+		if err != nil {
+			exit.WithError("Failed to get command runner", err)
 		}
 
 		// Unmount if Ctrl-C or kill request is received.
@@ -172,19 +180,22 @@ var mountCmd = &cobra.Command{
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			for sig := range c {
-				console.OutStyle("unmount", "Unmounting %s ...", vmPath)
-				cluster.Unmount(host, vmPath)
+				console.OutStyle(console.Unmount, "Unmounting %s ...", vmPath)
+				err := cluster.Unmount(runner, vmPath)
+				if err != nil {
+					console.ErrStyle(console.FailureType, "Failed unmount: %v", err)
+				}
 				exit.WithCode(exit.Interrupted, "Exiting due to %s signal", sig)
 			}
 		}()
 
-		err = cluster.Mount(host, ip.String(), vmPath, cfg)
+		err = cluster.Mount(runner, ip.String(), vmPath, cfg)
 		if err != nil {
 			exit.WithError("mount failed", err)
 		}
-		console.OutStyle("success", "Successfully mounted %s to %s", hostPath, vmPath)
+		console.OutStyle(console.SuccessType, "Successfully mounted %s to %s", hostPath, vmPath)
 		console.OutLn("")
-		console.OutStyle("notice", "NOTE: This process must stay alive for the mount to be accessible ...")
+		console.OutStyle(console.Notice, "NOTE: This process must stay alive for the mount to be accessible ...")
 		wg.Wait()
 	},
 }
@@ -194,8 +205,8 @@ func init() {
 	mountCmd.Flags().StringVar(&mountType, "type", nineP, "Specify the mount filesystem type (supported types: 9p)")
 	mountCmd.Flags().StringVar(&mountVersion, "9p-version", constants.DefaultMountVersion, "Specify the 9p version that the mount should use")
 	mountCmd.Flags().BoolVar(&isKill, "kill", false, "Kill the mount process spawned by minikube start")
-	mountCmd.Flags().IntVar(&uid, "uid", 1001, "Default user id used for the mount")
-	mountCmd.Flags().IntVar(&gid, "gid", 1001, "Default group id used for the mount")
+	mountCmd.Flags().StringVar(&uid, "uid", "docker", "Default user id used for the mount")
+	mountCmd.Flags().StringVar(&gid, "gid", "docker", "Default group id used for the mount")
 	mountCmd.Flags().UintVar(&mode, "mode", 0755, "File permissions used for the mount")
 	mountCmd.Flags().StringSliceVar(&options, "options", []string{}, "Additional mount options, such as cache=fscache")
 	mountCmd.Flags().IntVar(&mSize, "msize", constants.DefaultMsize, "The number of bytes to use for 9p packet payload")

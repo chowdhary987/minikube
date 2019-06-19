@@ -17,8 +17,10 @@ limitations under the License.
 package cluster
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/host"
@@ -214,7 +216,11 @@ func TestStopHostError(t *testing.T) {
 
 func TestStopHost(t *testing.T) {
 	api := tests.NewMockAPI()
-	h, _ := createHost(api, defaultMachineConfig)
+	h, err := createHost(api, defaultMachineConfig)
+	if err != nil {
+		t.Errorf("createHost failed: %v", err)
+	}
+
 	if err := StopHost(api); err != nil {
 		t.Fatal("An error should be thrown when stopping non-existing machine.")
 	}
@@ -225,7 +231,9 @@ func TestStopHost(t *testing.T) {
 
 func TestDeleteHost(t *testing.T) {
 	api := tests.NewMockAPI()
-	createHost(api, defaultMachineConfig)
+	if _, err := createHost(api, defaultMachineConfig); err != nil {
+		t.Errorf("createHost failed: %v", err)
+	}
 
 	if err := DeleteHost(api); err != nil {
 		t.Fatalf("Unexpected error deleting host: %v", err)
@@ -234,7 +242,10 @@ func TestDeleteHost(t *testing.T) {
 
 func TestDeleteHostErrorDeletingVM(t *testing.T) {
 	api := tests.NewMockAPI()
-	h, _ := createHost(api, defaultMachineConfig)
+	h, err := createHost(api, defaultMachineConfig)
+	if err != nil {
+		t.Errorf("createHost failed: %v", err)
+	}
 
 	d := &tests.MockDriver{RemoveError: true}
 
@@ -248,7 +259,9 @@ func TestDeleteHostErrorDeletingVM(t *testing.T) {
 func TestDeleteHostErrorDeletingFiles(t *testing.T) {
 	api := tests.NewMockAPI()
 	api.RemoveError = true
-	createHost(api, defaultMachineConfig)
+	if _, err := createHost(api, defaultMachineConfig); err != nil {
+		t.Errorf("createHost failed: %v", err)
+	}
 
 	if err := DeleteHost(api); err == nil {
 		t.Fatal("Expected error deleting host.")
@@ -270,10 +283,15 @@ func TestGetHostStatus(t *testing.T) {
 
 	checkState(state.None.String())
 
-	createHost(api, defaultMachineConfig)
+	if _, err := createHost(api, defaultMachineConfig); err != nil {
+		t.Errorf("createHost failed: %v", err)
+	}
+
 	checkState(state.Running.String())
 
-	StopHost(api)
+	if err := StopHost(api); err != nil {
+		t.Errorf("StopHost failed: %v", err)
+	}
 	checkState(state.Stopped.String())
 }
 
@@ -364,5 +382,22 @@ func TestCreateSSHShell(t *testing.T) {
 
 	if !s.IsSessionRequested() {
 		t.Fatalf("Expected ssh session to be run")
+	}
+}
+
+func TestGuestClockDelta(t *testing.T) {
+	local := time.Now()
+	h := tests.NewMockHost()
+	// Truncate remote clock so that it is between 0 and 1 second behind
+	h.CommandOutput["date +%s.%N"] = fmt.Sprintf("%d.0000", local.Unix())
+	got, err := guestClockDelta(h, local)
+	if err != nil {
+		t.Fatalf("guestClock: %v", err)
+	}
+	if got > (0 * time.Second) {
+		t.Errorf("unexpected positive delta (remote should be behind): %s", got)
+	}
+	if got < (-1 * time.Second) {
+		t.Errorf("unexpectedly negative delta (remote too far behind): %s", got)
 	}
 }

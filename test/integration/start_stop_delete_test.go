@@ -19,12 +19,14 @@ limitations under the License.
 package integration
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/machine/libmachine/state"
+	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/test/integration/util"
 )
 
@@ -33,10 +35,31 @@ func TestStartStop(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"docker+cache", []string{"--container-runtime=docker", "--cache-images"}},
-		{"docker+cache+ignore_verifications", []string{"--container-runtime=docker", "--cache-images", "--extra-config", "kubeadm.ignore-preflight-errors=SystemVerification"}},
-		{"containerd+cache", []string{"--container-runtime=containerd", "--docker-opt containerd=/var/run/containerd/containerd.sock", "--cache-images"}},
-		{"crio+cache", []string{"--container-runtime=crio", "--cache-images"}},
+		{"nocache_oldest", []string{
+			"--cache-images=false",
+			fmt.Sprintf("--kubernetes-version=%s", constants.OldestKubernetesVersion),
+			// default is the network created by libvirt, if we change the name minikube won't boot
+			// because the given network doesn't exist
+			"--kvm-network=default",
+		}},
+		{"feature_gates_newest_cni", []string{
+			"--feature-gates",
+			"ServerSideApply=true",
+			"--network-plugin=cni",
+			"--extra-config=kubelet.network-plugin=cni",
+			"--extra-config=kubeadm.pod-network-cidr=192.168.111.111/16",
+			fmt.Sprintf("--kubernetes-version=%s", constants.NewestKubernetesVersion),
+		}},
+		{"containerd_and_non_default_apiserver_port", []string{
+			"--container-runtime=containerd",
+			"--docker-opt containerd=/var/run/containerd/containerd.sock",
+			"--apiserver-port=8444",
+		}},
+		{"crio_ignore_preflights", []string{
+			"--container-runtime=crio",
+			"--extra-config",
+			"kubeadm.ignore-preflight-errors=SystemVerification",
+		}},
 	}
 
 	for _, test := range tests {
@@ -58,6 +81,16 @@ func TestStartStop(t *testing.T) {
 				t.Fatalf("IP command returned an invalid address: %s", ip)
 			}
 
+			// check for the current-context before and after the stop
+			kubectlRunner := util.NewKubectlRunner(t)
+			currentContext, err := kubectlRunner.RunCommand([]string{"config", "current-context"})
+			if err != nil {
+				t.Fatalf("Failed to fetch current-context")
+			}
+			if strings.TrimRight(string(currentContext), "\n") != "minikube" {
+				t.Fatalf("got current-context - %q, want  current-context %q", string(currentContext), "minikube")
+			}
+
 			checkStop := func() error {
 				r.RunCommand("stop", true)
 				return r.CheckStatusNoFail(state.Stopped.String())
@@ -65,6 +98,11 @@ func TestStartStop(t *testing.T) {
 
 			if err := util.Retry(t, checkStop, 5*time.Second, 6); err != nil {
 				t.Fatalf("timed out while checking stopped status: %v", err)
+			}
+
+			// running this command results in error when the current-context is not set
+			if err := r.Run("config current-context"); err != nil {
+				t.Logf("current-context is not set to minikube")
 			}
 
 			r.Start(test.args...)
